@@ -1,0 +1,351 @@
+// prisma/schema.prisma
+// DisparesSMS — Schema completo de banco de dados
+// Execute: npx prisma migrate dev --name init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────
+// PLANOS
+// ─────────────────────────────────────────────
+model Plan {
+  id              String   @id @default(uuid())
+  name            String   // "Starter" | "Pro" | "Enterprise"
+  slug            String   @unique // "starter" | "pro" | "enterprise"
+  price           Decimal  @db.Decimal(10, 2) // R$ por mês
+  smsLimit        Int      // SMS inclusos por mês (0 = ilimitado)
+  pricePerSms     Decimal  @db.Decimal(10, 4) // R$ por SMS excedente
+  features        Json     // { api: true, scheduling: true, ... }
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  tenants         Tenant[]
+
+  @@map("plans")
+}
+
+// ─────────────────────────────────────────────
+// TENANTS (EMPRESAS CLIENTES)
+// ─────────────────────────────────────────────
+model Tenant {
+  id              String       @id @default(uuid())
+  name            String
+  slug            String       @unique  // Ex: "fruitfy" → fruitfy.disparesms.com.br
+  email           String       @unique  // E-mail da empresa
+  phone           String?
+  document        String?      // CNPJ
+  planId          String
+  plan            Plan         @relation(fields: [planId], references: [id])
+  creditsBalance  Int          @default(0)  // créditos em SMS
+  smsSentMonth    Int          @default(0)  // contador mensal
+  status          TenantStatus @default(ACTIVE)
+  settings        Json?        // configurações específicas
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  users                User[]
+  contacts             Contact[]
+  contactLists         ContactList[]
+  campaigns            Campaign[]
+  messages             Message[]
+  creditTransactions   CreditTransaction[]
+  subscriptions        Subscription[]
+  apiKeys              ApiKey[]
+  senderIds            SenderId[]
+
+  @@map("tenants")
+}
+
+// ─────────────────────────────────────────────
+// USUÁRIOS
+// ─────────────────────────────────────────────
+model User {
+  id            String    @id @default(uuid())
+  tenantId      String
+  tenant        Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name          String
+  email         String
+  passwordHash  String
+  role          UserRole  @default(MEMBER)
+  isActive      Boolean   @default(true)
+  lastLoginAt   DateTime?
+  twoFactorEnabled Boolean @default(false)
+  twoFactorSecret  String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@unique([tenantId, email])
+  @@map("users")
+}
+
+// ─────────────────────────────────────────────
+// CONTATOS
+// ─────────────────────────────────────────────
+model Contact {
+  id          String    @id @default(uuid())
+  tenantId    String
+  tenant      Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  phone       String    // formato E.164: +5544999999999
+  name        String?
+  email       String?
+  variables   Json?     // { nome: "João", cidade: "Maringá" } — para personalização
+  tags        String[]
+  optedOut    Boolean   @default(false)
+  optedOutAt  DateTime?
+  isActive    Boolean   @default(true)
+  source      String?   // "csv_import" | "api" | "manual"
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  listMemberships ContactListMember[]
+  messages        Message[]
+
+  @@unique([tenantId, phone])
+  @@index([tenantId])
+  @@map("contacts")
+}
+
+// ─────────────────────────────────────────────
+// LISTAS DE CONTATOS
+// ─────────────────────────────────────────────
+model ContactList {
+  id          String    @id @default(uuid())
+  tenantId    String
+  tenant      Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name        String
+  description String?
+  count       Int       @default(0)  // cache do total de contatos
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  members     ContactListMember[]
+  campaigns   CampaignList[]
+
+  @@index([tenantId])
+  @@map("contact_lists")
+}
+
+model ContactListMember {
+  contactId     String
+  contact       Contact     @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  listId        String
+  list          ContactList @relation(fields: [listId], references: [id], onDelete: Cascade)
+  addedAt       DateTime    @default(now())
+
+  @@id([contactId, listId])
+  @@map("contact_list_members")
+}
+
+// ─────────────────────────────────────────────
+// CAMPANHAS
+// ─────────────────────────────────────────────
+model Campaign {
+  id            String          @id @default(uuid())
+  tenantId      String
+  tenant        Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name          String
+  messageBody   String          // "Olá {{nome}}, sua fatura de R$ {{valor}} vence hoje!"
+  status        CampaignStatus  @default(DRAFT)
+  type          CampaignType    @default(MARKETING)
+  scheduledAt   DateTime?       // null = disparo imediato
+  startedAt     DateTime?
+  completedAt   DateTime?
+  totalMessages Int             @default(0)
+  sentCount     Int             @default(0)
+  deliveredCount Int            @default(0)
+  failedCount   Int             @default(0)
+  provider      SmsProvider?    // qual provedor foi usado
+  metadata      Json?
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+
+  lists         CampaignList[]
+  messages      Message[]
+
+  @@index([tenantId])
+  @@index([status, scheduledAt])
+  @@map("campaigns")
+}
+
+model CampaignList {
+  campaignId  String
+  campaign    Campaign    @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  listId      String
+  list        ContactList @relation(fields: [listId], references: [id])
+
+  @@id([campaignId, listId])
+  @@map("campaign_lists")
+}
+
+// ─────────────────────────────────────────────
+// MENSAGENS (LOG INDIVIDUAL DE CADA SMS)
+// ─────────────────────────────────────────────
+model Message {
+  id              String        @id @default(uuid())
+  tenantId        String
+  tenant          Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  campaignId      String?
+  campaign        Campaign?     @relation(fields: [campaignId], references: [id])
+  contactId       String?
+  contact         Contact?      @relation(fields: [contactId], references: [id])
+  phone           String        // número de destino (denormalizado para histórico)
+  body            String        // mensagem final após substituição de variáveis
+  status          MessageStatus @default(QUEUED)
+  provider        SmsProvider   @default(ZENVIA)
+  providerMsgId   String?       // ID retornado pelo provedor
+  providerStatus  String?       // status raw do provedor
+  cost            Decimal?      @db.Decimal(10, 4)  // custo real do SMS
+  errorMessage    String?
+  sentAt          DateTime?
+  deliveredAt     DateTime?
+  failedAt        DateTime?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  @@index([tenantId])
+  @@index([campaignId])
+  @@index([status])
+  @@index([providerMsgId])
+  @@map("messages")
+}
+
+// ─────────────────────────────────────────────
+// TRANSAÇÕES DE CRÉDITO
+// ─────────────────────────────────────────────
+model CreditTransaction {
+  id          String              @id @default(uuid())
+  tenantId    String
+  tenant      Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  type        CreditTransactionType
+  amount      Int                 // positivo = crédito, negativo = débito
+  balance     Int                 // saldo após transação
+  description String
+  reference   String?             // ex: campaign_id ou subscription_id
+  createdAt   DateTime            @default(now())
+
+  @@index([tenantId])
+  @@map("credit_transactions")
+}
+
+// ─────────────────────────────────────────────
+// ASSINATURAS (PLANOS MENSAIS)
+// ─────────────────────────────────────────────
+model Subscription {
+  id                  String             @id @default(uuid())
+  tenantId            String
+  tenant              Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  planId              String
+  status              SubscriptionStatus @default(ACTIVE)
+  currentPeriodStart  DateTime
+  currentPeriodEnd    DateTime
+  stripeSubscriptionId String?
+  asaasSubscriptionId  String?
+  cancelAtPeriodEnd   Boolean            @default(false)
+  canceledAt          DateTime?
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+
+  @@index([tenantId])
+  @@map("subscriptions")
+}
+
+// ─────────────────────────────────────────────
+// API KEYS
+// ─────────────────────────────────────────────
+model ApiKey {
+  id          String    @id @default(uuid())
+  tenantId    String
+  tenant      Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name        String
+  keyHash     String    @unique  // hash da chave real
+  keyPrefix   String             // primeiros 8 chars para identificação: "dsms_sk_"
+  lastUsedAt  DateTime?
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+
+  @@index([tenantId])
+  @@map("api_keys")
+}
+
+// ─────────────────────────────────────────────
+// SENDER IDs (remetente configurado)
+// ─────────────────────────────────────────────
+model SenderId {
+  id          String    @id @default(uuid())
+  tenantId    String
+  tenant      Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name        String    // "MinhaMarca"
+  isDefault   Boolean   @default(false)
+  isApproved  Boolean   @default(false)
+  createdAt   DateTime  @default(now())
+
+  @@map("sender_ids")
+}
+
+// ─────────────────────────────────────────────
+// ENUMS
+// ─────────────────────────────────────────────
+enum TenantStatus {
+  ACTIVE
+  SUSPENDED
+  CANCELLED
+}
+
+enum UserRole {
+  OWNER
+  ADMIN
+  MEMBER
+}
+
+enum CampaignStatus {
+  DRAFT
+  SCHEDULED
+  RUNNING
+  COMPLETED
+  CANCELLED
+  FAILED
+}
+
+enum CampaignType {
+  MARKETING
+  TRANSACTIONAL
+  RECOVERY
+}
+
+enum MessageStatus {
+  QUEUED
+  SENDING
+  SENT
+  DELIVERED
+  FAILED
+  UNDELIVERED
+  OPTED_OUT
+}
+
+enum SmsProvider {
+  ZENVIA
+  TWILIO
+  INFOBIP
+}
+
+enum CreditTransactionType {
+  PURCHASE       // compra de créditos
+  PLAN_GRANT     // créditos do plano mensal
+  SMS_DEBIT      // débito por SMS enviado
+  REFUND         // estorno
+  MANUAL         // ajuste manual pelo admin
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  PAST_DUE
+  CANCELLED
+  TRIALING
+}
