@@ -9,9 +9,22 @@ import { DispatchService } from './dispatch.service';
 @Module({
   imports: [
     BullModule.forRootAsync({
-      useFactory: () => ({
-     connection: process.env.REDIS_URL || 'redis://localhost:6379',
-      }),
+      useFactory: () => {
+        const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
+        try {
+          const url = new URL(redisUrl);
+          return {
+            connection: {
+              host: url.hostname,
+              port: parseInt(url.port) || 6379,
+              password: url.password || undefined,
+              tls: redisUrl.startsWith('rediss://') ? {} : undefined,
+            },
+          };
+        } catch {
+          return { connection: { host: 'localhost', port: 6379 } };
+        }
+      },
     }),
     BullModule.registerQueue({ name: 'sms-dispatch' }),
   ],
