@@ -69,7 +69,7 @@ export class CampaignsService {
         tenantId,
         name: dto.name,
         messageBody: dto.messageBody,
-        type: dto.type || 'MARKETING',
+      type: (dto.type || 'MARKETING') as any,
         status: 'DRAFT',
         scheduledAt: dto.scheduledAt ? new Date(dto.scheduledAt) : null,
         lists: dto.listIds?.length
