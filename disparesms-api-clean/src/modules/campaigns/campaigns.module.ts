@@ -10,7 +10,7 @@ import { DispatchService } from './dispatch.service';
   imports: [
     BullModule.forRootAsync({
       useFactory: () => ({
-        connection: { url: process.env.REDIS_URL || 'redis://localhost:6379' },
+     connection: process.env.REDIS_URL || 'redis://localhost:6379',
       }),
     }),
     BullModule.registerQueue({ name: 'sms-dispatch' }),
