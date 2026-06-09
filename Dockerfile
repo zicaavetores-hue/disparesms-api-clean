@@ -12,6 +12,8 @@ COPY disparesms-api-clean/ .
 RUN npx prisma generate
 RUN npm run build
 
+RUN ls -la dist/ || echo "dist not found"
+
 EXPOSE 3001
 
-CMD ["node", "dist/main"]
+CMD ["node", "/app/dist/main"]
