@@ -2,12 +2,12 @@ FROM node:20-alpine
 
 WORKDIR /app
 
-COPY package*.json ./
-COPY prisma ./prisma/
+COPY disparesms-api-clean/package*.json ./
+COPY disparesms-api-clean/prisma ./prisma/
 
 RUN npm install
 
-COPY . .
+COPY disparesms-api-clean/ .
 
 RUN npx prisma generate
 RUN npm run build
