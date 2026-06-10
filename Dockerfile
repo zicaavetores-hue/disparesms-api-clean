@@ -5,7 +5,7 @@ WORKDIR /app
 COPY disparesms-api-clean/package*.json ./
 COPY disparesms-api-clean/prisma ./prisma/
 
-RUN npm install
+RUN npm ci || npm install
 
 COPY disparesms-api-clean/ .
 
@@ -16,4 +16,4 @@ RUN ls -la dist/ || echo "dist not found"
 
 EXPOSE 3001
 
-CMD npx prisma migrate deploy && node /app/dist/src/main
+CMD sh -c "npx prisma migrate deploy && node \$(find /app/dist -name main.js | head -n 1)"
