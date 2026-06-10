@@ -16,4 +16,4 @@ RUN ls -la dist/ || echo "dist not found"
 
 EXPOSE 3001
 
-CMD ["node", "/app/dist/main"]
+CMD npx prisma migrate deploy && node /app/dist/main
