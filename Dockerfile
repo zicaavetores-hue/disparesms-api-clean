@@ -1,7 +1,7 @@
 FROM node:20-alpine
 
 WORKDIR /app
-
+RUN apk add --no-cache openssl libc6-compat
 COPY disparesms-api-clean/package*.json ./
 COPY disparesms-api-clean/prisma ./prisma/
 
